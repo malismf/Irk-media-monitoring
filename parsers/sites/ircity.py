@@ -143,7 +143,7 @@ class IrCityParser(BaseNewsParser):
                 article_soup = await self._fetch_with_curl(session, article_url)
 
                 if article_soup:
-                    post = await self._parse_article(article_soup, article_url)
+                    post = await self._parse_article(article_soup, article_url, section_soup=soup)
                     if post:
                         posts.append(post)
                         await self.delay()
@@ -178,7 +178,7 @@ class IrCityParser(BaseNewsParser):
 
         return links
 
-    async def _parse_article(self, soup: BeautifulSoup, url: str) -> Optional[Post]:
+    async def _parse_article(self, soup: BeautifulSoup, url: str, section_soup: BeautifulSoup) -> Optional[Post]:
         """Парсинг статьи"""
         title = self._extract_title(soup)
         if not title:
@@ -189,7 +189,7 @@ class IrCityParser(BaseNewsParser):
 
         # Извлекаем количество просмотров и комментариев
         views_count = self._extract_views_count(soup)
-        comments_count = self._extract_comments_count(soup)
+        comments_count = self._extract_comments_count(section_soup, url)
 
         content = self._extract_content(soup)
         if not content:
@@ -361,17 +361,24 @@ class IrCityParser(BaseNewsParser):
                                 pass
         return 0
 
-    def _extract_comments_count(self, soup: BeautifulSoup) -> int:
-        """Извлечь количество комментариев"""
-        # Ищем элемент с комментариями
-        comments_elem = soup.find(class_=re.compile(r'(comment|discuss)', re.IGNORECASE))
-        if comments_elem:
-            text = comments_elem.get_text()
-            # Извлекаем число из текста
-            match = re.search(r'(\d+)', text)
-            if match:
-                try:
-                    return int(match.group(1))
-                except ValueError:
-                    pass
+    def _extract_comments_count(self, soup: BeautifulSoup, article_link: str) -> int:
+        """Извлечь количество комментариев из блока статистики новости."""
+        article_elem = soup.find("a", href=article_link)
+        if not article_elem:
+            return 0
+
+        for container in article_elem.parents:
+            statistics = container.find(class_=re.compile(r"statistic", re.IGNORECASE), recursive=False)
+            if statistics:
+                comments_link = (
+                    statistics.find("a", href=re.compile(r"/comments/?$"))
+                    or statistics.find("a", class_=re.compile(r"comments", re.IGNORECASE))
+                )
+                count_elem = comments_link.find("span", class_=re.compile(r"text", re.IGNORECASE)) if comments_link else None
+                match = re.search(r"\d+", count_elem.get_text()) if count_elem else None
+                if match:
+                    comments_count = int(match.group())
+                    return comments_count
+                return 0
+
         return 0
